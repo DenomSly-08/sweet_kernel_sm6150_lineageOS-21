@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2021 XiaoMi, Inc.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -367,32 +368,9 @@ static void _sde_debugfs_destroy(struct sde_kms *sde_kms)
 static int sde_kms_enable_vblank(struct msm_kms *kms, struct drm_crtc *crtc)
 {
 	int ret = 0;
-	struct sde_kms *sde_kms;
-	struct msm_drm_private *priv;
-	struct sde_crtc *sde_crtc;
-	struct drm_encoder *drm_enc;
-
-	sde_kms = to_sde_kms(kms);
-	priv = sde_kms->dev->dev_private;
-	sde_crtc = to_sde_crtc(crtc);
 
 	SDE_ATRACE_BEGIN("sde_kms_enable_vblank");
-
-	if (sde_crtc->vblank_requested == false) {
-		SDE_ATRACE_BEGIN("sde_encoder_trigger_early_wakeup");
-		drm_for_each_encoder(drm_enc, crtc->dev)
-			sde_encoder_trigger_early_wakeup(drm_enc);
-
-		if (sde_kms->first_kickoff) {
-			sde_power_scale_reg_bus(&priv->phandle,
-					sde_kms->core_client,
-					VOTE_INDEX_HIGH, false);
-		}
-		SDE_ATRACE_END("sde_encoder_trigger_early_wakeup");
-	}
-
 	ret = sde_crtc_vblank(crtc, true);
-
 	SDE_ATRACE_END("sde_kms_enable_vblank");
 
 	return ret;
@@ -1074,7 +1052,11 @@ static void sde_kms_commit(struct msm_kms *kms,
 			sde_crtc_commit_kickoff(crtc, old_crtc_state);
 		}
 	}
-
+/*
+	for_each_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		sde_crtc_fod_ui_ready(crtc, old_crtc_state);
+	}
+*/
 	SDE_ATRACE_END("sde_kms_commit");
 }
 
@@ -1161,7 +1143,9 @@ static void sde_kms_complete_commit(struct msm_kms *kms,
 	SDE_ATRACE_BEGIN("sde_kms_complete_commit");
 
 	for_each_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		SDE_ATRACE_BEGIN("sde_crtc_complete_commit");
 		sde_crtc_complete_commit(crtc, old_crtc_state);
+		SDE_ATRACE_END("sde_crtc_complete_commit");
 
 		/* complete secure transitions if any */
 		if (sde_kms->smmu_state.transition_type == POST_COMMIT)
@@ -1185,11 +1169,14 @@ static void sde_kms_complete_commit(struct msm_kms *kms,
 			SDE_EVT32(connector->base.id, c_conn->qsync_mode);
 		}
 
+		SDE_ATRACE_BEGIN("post_kickoff");
 		rc = c_conn->ops.post_kickoff(connector, &params);
+		SDE_ATRACE_END("post_kickoff");
 		if (rc) {
 			pr_err("Connector Post kickoff failed rc=%d\n",
 					 rc);
 		}
+		sde_connector_fod_notify(connector);
 	}
 
 	sde_power_resource_enable(&priv->phandle, sde_kms->core_client, false);
@@ -2811,7 +2798,11 @@ retry:
 	if (ret)
 		goto end;
 
-	drm_atomic_commit(state);
+	ret = drm_atomic_commit(state);
+	if (ret) {
+		DRM_ERROR("error %d committing state\n", ret);
+		goto end;
+	}
 end:
 	if (state)
 		drm_atomic_state_put(state);
@@ -3757,30 +3748,4 @@ int sde_kms_handle_recovery(struct drm_encoder *encoder)
 {
 	SDE_EVT32(DRMID(encoder), MSM_ENC_ACTIVE_REGION);
 	return sde_encoder_wait_for_event(encoder, MSM_ENC_ACTIVE_REGION);
-}
-
-void sde_kms_trigger_early_wakeup(struct sde_kms *sde_kms,
-		struct drm_crtc *crtc)
-{
-	struct msm_drm_private *priv;
-	struct drm_encoder *drm_enc;
-
-	if (!sde_kms || !crtc) {
-		SDE_ERROR("invalid argument sde_kms %pK crtc %pK\n",
-			sde_kms, crtc);
-		return;
-	}
-
-	priv = sde_kms->dev->dev_private;
-
-	SDE_ATRACE_BEGIN("sde_kms_trigger_early_wakeup");
-	drm_for_each_encoder_mask(drm_enc, crtc->dev, crtc->state->encoder_mask)
-		sde_encoder_trigger_early_wakeup(drm_enc);
-
-	if (sde_kms->first_kickoff) {
-		sde_power_scale_reg_bus(&priv->phandle,
-				sde_kms->core_client,
-				VOTE_INDEX_HIGH, false);
-	}
-	SDE_ATRACE_END("sde_kms_trigger_early_wakeup");
 }

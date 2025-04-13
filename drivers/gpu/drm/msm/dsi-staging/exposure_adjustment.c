@@ -42,7 +42,7 @@ static int ea_panel_send_pcc(u32 bl_lvl)
 	u32 ea_coeff;
 	uint64_t val;
 
- 	display = get_main_display();
+ 	display = get_primary_display();
 	crtc = display->drm_conn->state->crtc;
 	if (!crtc) {
 		pr_err("ERROR: Cannot find display panel with CRTC\n");
@@ -90,6 +90,11 @@ static int ea_panel_send_pcc(u32 bl_lvl)
 	}
 
 	return rc;
+}
+
+bool ea_panel_is_enabled(void)
+{
+	return pcc_backlight_enable;
 }
 
 void ea_panel_mode_ctrl(struct dsi_panel *panel, bool enable)

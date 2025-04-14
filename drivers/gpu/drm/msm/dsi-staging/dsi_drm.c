@@ -46,6 +46,8 @@ static struct dsi_display_mode_priv_info default_priv_info = {
 	.dsc_enabled = false,
 };
 
+static struct wakeup_source prim_panel_wakelock;
+
 static void convert_to_dsi_mode(const struct drm_display_mode *drm_mode,
 				struct dsi_display_mode *dsi_mode)
 {
@@ -517,8 +519,10 @@ static void dsi_bridge_post_disable_work(struct work_struct *work)
 	if (!bridge)
 		return;
 
-	if (atomic_read(&bridge->display_active))
+	if (atomic_read(&bridge->display_active)) {
 		dsi_bridge_post_disable(&bridge->base);
+		__pm_relax(&prim_panel_wakelock);
+	}
 }
 
 static void dsi_bridge_mode_set(struct drm_bridge *bridge,
@@ -1289,6 +1293,7 @@ void dsi_drm_bridge_cleanup(struct dsi_bridge *bridge)
 	if (bridge) {
 		atomic_set(&bridge->display_active, false);
 		cancel_delayed_work_sync(&bridge->pd_work);
+		wakeup_source_trash(&prim_panel_wakelock);
 	}
 
 	kfree(bridge);

@@ -220,7 +220,8 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 
 	atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
 
-	if (atomic_read(&c_bridge->display_active)) {
+	if (c_bridge->display->is_prim_display &&
+		atomic_read(&c_bridge->display_active)) {
 		cancel_delayed_work_sync(&c_bridge->pd_work);
 		__pm_relax(&prim_panel_wakelock);
 		if (c_bridge->display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
@@ -273,7 +274,8 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 		pr_err("Continuous splash pipeline cleanup failed, rc=%d\n",
 									rc);
 
-	atomic_set(&c_bridge->display_active, true);
+	if (c_bridge->display->is_prim_display)
+		atomic_set(&c_bridge->display_active, true);
 }
 
 int panel_disp_param_send(struct dsi_display *display, int cmd);
@@ -503,7 +505,8 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 
 	msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK, &notify_data);
 
-	atomic_set(&c_bridge->display_active, false);
+	if (c_bridge->display->is_prim_display)
+		atomic_set(&c_bridge->display_active, false);
 }
 
 static void dsi_bridge_post_disable_work(struct work_struct *work)
@@ -1263,10 +1266,13 @@ struct dsi_bridge *dsi_drm_bridge_init(struct dsi_display *display,
 	encoder->bridge->is_dsi_drm_bridge = true;
 	mutex_init(&encoder->bridge->lock);
 
-	atomic_set(&resume_pending, 0);
-	atomic_set(&bridge->display_active, false);
-	init_waitqueue_head(&resume_wait_q);
-	INIT_DELAYED_WORK(&bridge->pd_work, dsi_bridge_post_disable_work);
+	if (display->is_prim_display) {
+		atomic_set(&resume_pending, 0);
+		wakeup_source_init(&prim_panel_wakelock, "prim_panel_wakelock");
+		atomic_set(&bridge->display_active, false);
+		init_waitqueue_head(&resume_wait_q);
+		INIT_DELAYED_WORK(&bridge->pd_work, dsi_bridge_post_disable_work);
+	}
 
 	return bridge;
 error_free_bridge:
